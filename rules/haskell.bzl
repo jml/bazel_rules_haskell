@@ -50,16 +50,16 @@ _hs_attrs = {
 }
 
 hs_library = rule(
-    implementation = _hs_library_impl,
     attrs = _hs_attrs,
     outputs = {
         "obj": "%{name}.o",
         "interface": "%{name}.hi",
     },
+    implementation = _hs_library_impl,
 )
 
 hs_binary = rule(
-    implementation = _hs_binary_impl,
     attrs = _hs_attrs,
     executable = True,
+    implementation = _hs_binary_impl,
 )

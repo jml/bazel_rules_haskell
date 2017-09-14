@@ -1,5 +1,5 @@
-def _hs_library_impl(ctx):
-  """Haskell library
+def _hs_module_impl(ctx):
+  """A single Haskell module.
 
   At the moment this only really works with a single file in srcs.
   """
@@ -49,11 +49,19 @@ _hs_attrs = {
     ),
 }
 
-hs_library = rule(
+hs_module = rule(
     attrs = _hs_attrs,
     outputs = {
         "obj": "%{name}.o",
         "interface": "%{name}.hi",
+    },
+    implementation = _hs_module_impl,
+)
+
+hs_library = rule(
+    attrs = _hs_attrs,
+    outputs = {
+        "library": "libHS{name}.a",
     },
     implementation = _hs_library_impl,
 )

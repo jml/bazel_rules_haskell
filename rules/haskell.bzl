@@ -1,3 +1,18 @@
+"""Haskell Rules
+
+Thes build rules are used for building Haskell projects with Bazel.
+"""
+
+HASKELL_FILETYPE = [".hs"]
+
+def _haskell_toolchain(ctx):
+  # TODO: Assemble this from something like 'repositories', which fetches the
+  # toolchain and uses that to build things, rather than assuming a system GHC
+  # is installed.
+  return struct(
+    ghc_path = "ghc",
+  )
+
 def _hs_module_impl(ctx):
   """A single Haskell module.
 
@@ -5,13 +20,14 @@ def _hs_module_impl(ctx):
   """
   # Using new_file here instead of ctx.outputs to keep it reusable within
   # _hs_binary_impl
+  toolchain = _haskell_toolchain(ctx)
   out_o = ctx.new_file(ctx.label.name + ".o")
   out_hi = ctx.new_file(ctx.label.name + ".hi")
   ctx.action(
       inputs = ctx.files.srcs + ctx.files.deps + ctx.files.data,
       outputs = [out_o, out_hi],
       command = " ".join([
-          "HOME=/fake", "ghc", "-c",
+          "HOME=/fake", toolchain.ghc_path, "-c",
           "-o", out_o.path,
           "-ohi", out_hi.path,
           "-i",
@@ -24,13 +40,17 @@ def _hs_module_impl(ctx):
                 interface = out_hi)
 
 def _hs_binary_impl(ctx):
+  # XXX: This is wrong. We don't want to build a library for a binary, nor do
+  # we want to build a single module. Rather, we want to compile all of the
+  # sources to objects and then use GHC to build an executable from those.
   lib_self = _hs_library_impl(ctx)
   objects = [x.obj for x in ctx.attr.deps] + [lib_self.obj]
+  toolchain = _haskell_toolchain(ctx)
   ctx.action(
       inputs = objects + ctx.files.data,
       outputs = [ctx.outputs.executable],
       command = " ".join([
-          "HOME=/fake", "ghc",
+          "HOME=/fake", toolchain.ghc_path,
           "-o", ctx.outputs.executable.path,
           cmd_helper.join_paths(" ", set(objects))
       ]),
@@ -39,7 +59,7 @@ def _hs_binary_impl(ctx):
 
 _hs_attrs = {
     "srcs": attr.label_list(
-        allow_files = FileType([".hs"]),
+        allow_files = HASKELL_FILETYPE,
     ),
     "deps": attr.label_list(
         allow_files = False,

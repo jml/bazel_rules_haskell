@@ -5,6 +5,20 @@ Thes build rules are used for building Haskell projects with Bazel.
 
 HASKELL_FILETYPE = [".hs"]
 
+def _is_haskell_source_file(filename):
+  """Is 'filename' a valid Haskell source file?"""
+  for filetype in HASKELL_FILETYPE:
+    if filename.endswith(filetype):
+      return True
+  return False
+
+def _change_extention(filename, new_extension):
+  """Return 'filename' but with a new extension."""
+  if '.' not in filename:
+    return filename + '.' + new_extension
+  base, ext = filename.rsplit('.', 1)
+  return base + '.' + new_extension
+
 def _haskell_toolchain(ctx):
   # TODO: Assemble this from something like 'repositories', which fetches the
   # toolchain and uses that to build things, rather than assuming a system GHC
@@ -39,11 +53,91 @@ def _hs_module_impl(ctx):
   return struct(obj = out_o,
                 interface = out_hi)
 
+# XXX: Possibly rename this to hs_package, since it's unclear what "building a
+# Haskell library" means without the package system, and since jml can't find
+# a documented way to use libraries without interacting with the package
+# database.
+def _hs_library_impl(ctx):
+  """A Haskell library."""
+  toolchain = _haskell_toolchain(ctx)
+  object_files = []
+  interface_files = []
+  # XXX: Are these string filenames or File objects? Who can say?
+  for src in ctx.attr.srcs:
+    if not _is_haskell_source_file(src):
+      # XXX: We probably want to allow srcs that aren't Haskell files (genrule
+      # results? *.o files?). For now, keeping it simple.
+      fail("Can only build Haskell libraries from source files: " % (src,))
+    object_files.append(ctx.actions.declare_file(_change_extention(src, 'o')))
+    interface_files.append(ctx.actions.declare_file(_change_extention(src, 'hi')))
+
+  # XXX: Unclear whether it would be better to have one action per *.hs file
+  # or just one action which takes all *.hs files and compiles them.
+
+  # XXX: Related: Unclear whether we should use '--make' and let GHC figure out
+  # dependencies or whether instead we should encourage per-module rules.
+  ghc_args = [
+    '-c',  # So we just compile things, no linking
+    '--make',  # Let GHC figure out dependencies
+    '-i',  # Empty the import directory list
+    # XXX: stack also includes
+    # -ddump-hi
+    # -ddump-to-file
+    # -fbuilding-cabal-package -- this just changes some warning text
+    # -static  -- use static libraries, if possibly
+    # -dynamic-too
+    # -optP-include
+    # -optP.stack-work/.../cabal_macros.h
+    # -this-unit-id <label-name>-<version>-<thigummy>
+    #
+    # - various output dir controls
+    # - various package db controls
+    #
+    # Also what about...
+    # - optimizations
+    # - warnings
+    # - concurrent builds (-j4)
+    # - -threaded (I guess only relevant for executables)
+  ]
+  ctx.actions.run(
+    inputs = ctx.attr.srcs,
+    outputs = object_files + interface_files,
+    executable = toolchain.ghc_path,
+    # XXX: Is it OK to rely on `ghc` sending output to same directory?
+    arguments = ghc_args + ctx.attr.srcs,
+    progress_message = ("Compiling Haskell library %s (%d files)"
+                        % (ctx.label.name, len(ctx.attr.srcs))),
+    mnemonic = 'HsCompile',
+  )
+
+  # https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/packages.html#building-a-package-from-haskell-source
+  # ar cqs libHSfoo-1.0.a A.o B.o C.o ...
+  # XXX: jml doesn't know what these arguments mean, nor whether they work on macOS.
+  # stack uses '-r -s' on macOS
+  ar_args = ['cqs']
+  output_name = ctx.outputs.hs_lib
+  ctx.actions.run(
+    inputs = object_files,
+    outputs = [output_name],
+    # XXX: bazel must surely have standard infrastructure for getting at a
+    # linker
+    executable = ctx.fragments.cpp.ar_executable,
+    args = [ar_args, output_name] + object_files,
+    progress_message = ("Linking Haskell library %s (%d files)"
+                        % (ctx.label.name, len(object_files))),
+    mnemonic = 'HsLink',
+  )
+  # XXX: jml doesn't know what to return from here. Cargo culting from rust.
+  return struct(
+    hs_lib = hs_lib,
+  )
+
+
 def _hs_binary_impl(ctx):
   # XXX: This is wrong. We don't want to build a library for a binary, nor do
   # we want to build a single module. Rather, we want to compile all of the
   # sources to objects and then use GHC to build an executable from those.
-  lib_self = _hs_library_impl(ctx)
+  lib_self = _hs_module_impl(ctx)
   objects = [x.obj for x in ctx.attr.deps] + [lib_self.obj]
   toolchain = _haskell_toolchain(ctx)
   ctx.action(
@@ -79,11 +173,12 @@ hs_module = rule(
 )
 
 hs_library = rule(
-    attrs = _hs_attrs,
-    outputs = {
-        "library": "libHS{name}.a",
-    },
-    implementation = _hs_library_impl,
+  attrs = _hs_attrs,
+  fragments = ["cpp"],
+  implementation = _hs_library_impl,
+  outputs = {
+    "hs_lib": "libHS%{name}.a",
+  },
 )
 
 hs_binary = rule(

@@ -1,23 +1,15 @@
 """Haskell Rules
 
-Thes build rules are used for building Haskell projects with Bazel.
+These build rules are used for building Haskell projects with Bazel.
 """
 
-HASKELL_FILETYPE = [".hs"]
+# Current implementation approach is to re-implement Cabal in Bazel and rely
+# on `--make`.
 
-def _is_haskell_source_file(filename):
-  """Is 'filename' a valid Haskell source file?"""
-  for filetype in HASKELL_FILETYPE:
-    if filename.endswith(filetype):
-      return True
-  return False
+# An alternative approach might be to insist that each and every module be
+# specified. I think we might get that as an option "for free".
 
-def _change_extention(filename, new_extension):
-  """Return 'filename' but with a new extension."""
-  if '.' not in filename:
-    return filename + '.' + new_extension
-  base, ext = filename.rsplit('.', 1)
-  return base + '.' + new_extension
+HASKELL_FILETYPE = ["hs"]
 
 def _haskell_toolchain(ctx):
   # TODO: Assemble this from something like 'repositories', which fetches the
@@ -53,6 +45,11 @@ def _hs_module_impl(ctx):
   return struct(obj = out_o,
                 interface = out_hi)
 
+
+def _change_extension(file_object, new_extension):
+  """Return the basename of 'file_object' with a new extension."""
+  return file_object.basename[:-len(file_object.extension)] + new_extension
+
 # XXX: Possibly rename this to hs_package, since it's unclear what "building a
 # Haskell library" means without the package system, and since jml can't find
 # a documented way to use libraries without interacting with the package
@@ -62,14 +59,14 @@ def _hs_library_impl(ctx):
   toolchain = _haskell_toolchain(ctx)
   object_files = []
   interface_files = []
-  # XXX: Are these string filenames or File objects? Who can say?
-  for src in ctx.attr.srcs:
-    if not _is_haskell_source_file(src):
+  for src in ctx.files.srcs:
+    if src.extension not in HASKELL_FILETYPE:
       # XXX: We probably want to allow srcs that aren't Haskell files (genrule
       # results? *.o files?). For now, keeping it simple.
-      fail("Can only build Haskell libraries from source files: " % (src,))
-    object_files.append(ctx.actions.declare_file(_change_extention(src, 'o')))
-    interface_files.append(ctx.actions.declare_file(_change_extention(src, 'hi')))
+      fail("Can only build Haskell libraries from source files: %s" % (src.path,))
+
+    object_files.append(ctx.actions.declare_file(_change_extension(src, 'o'), sibling=src))
+    interface_files.append(ctx.actions.declare_file(_change_extension(src, 'hi'), sibling=src))
 
   # XXX: Unclear whether it would be better to have one action per *.hs file
   # or just one action which takes all *.hs files and compiles them.
@@ -100,14 +97,15 @@ def _hs_library_impl(ctx):
     # - -threaded (I guess only relevant for executables)
   ]
   ctx.actions.run(
-    inputs = ctx.attr.srcs,
+    inputs = ctx.files.srcs,
     outputs = object_files + interface_files,
     executable = toolchain.ghc_path,
     # XXX: Is it OK to rely on `ghc` sending output to same directory?
-    arguments = ghc_args + ctx.attr.srcs,
+    arguments = ghc_args + [f.path for f in ctx.files.srcs],
     progress_message = ("Compiling Haskell library %s (%d files)"
                         % (ctx.label.name, len(ctx.attr.srcs))),
     mnemonic = 'HsCompile',
+    use_default_shell_env = True,  # TODO: Figure out how we can do without this.
   )
 
   # https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/packages.html#building-a-package-from-haskell-source
@@ -115,14 +113,13 @@ def _hs_library_impl(ctx):
   # XXX: jml doesn't know what these arguments mean, nor whether they work on macOS.
   # stack uses '-r -s' on macOS
   ar_args = ['cqs']
-  output_name = ctx.outputs.hs_lib
+  hs_lib = ctx.outputs.hs_lib
+  print([f.path for f in object_files])
   ctx.actions.run(
     inputs = object_files,
-    outputs = [output_name],
-    # XXX: bazel must surely have standard infrastructure for getting at a
-    # linker
+    outputs = [hs_lib],
     executable = ctx.fragments.cpp.ar_executable,
-    args = [ar_args, output_name] + object_files,
+    arguments = ar_args + [hs_lib.path] + [f.path for f in object_files],
     progress_message = ("Linking Haskell library %s (%d files)"
                         % (ctx.label.name, len(object_files))),
     mnemonic = 'HsLink',

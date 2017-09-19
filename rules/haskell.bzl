@@ -9,7 +9,7 @@ These build rules are used for building Haskell projects with Bazel.
 # An alternative approach might be to insist that each and every module be
 # specified. I think we might get that as an option "for free".
 
-HASKELL_FILETYPE = ["hs"]
+HASKELL_FILETYPE = ["hs", "lhs"]
 
 def _haskell_toolchain(ctx):
   # TODO: Assemble this from something like 'repositories', which fetches the

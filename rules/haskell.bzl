@@ -46,6 +46,53 @@ def _hs_module_impl(ctx):
                 interface = out_hi)
 
 
+def _hs_compile(toolchain, actions, src):
+  """Compile a single Haskell module."""
+  if src.extension not in HASKELL_FILETYPE:
+    # XXX: We probably want to allow srcs that aren't Haskell files (genrule
+    # results? *.o files?). For now, keeping it simple.
+    fail("Can only build Haskell libraries from source files: %s" % (src.path,))
+
+  object_file = actions.declare_file(_change_extension(src, 'o'), sibling=src)
+  interface_file = actions.declare_file(_change_extension(src, 'hi'), sibling=src)
+
+  ghc_args = [
+    '-c',  # So we just compile things, no linking
+    '-i',  # Empty the import directory list
+    '-o%s' % object_file.path,
+    '-ohi%s' % interface_file.path,
+    src.path,
+    # XXX: stack also includes
+    # -ddump-hi
+    # -ddump-to-file
+    # -fbuilding-cabal-package -- this just changes some warning text
+    # -static  -- use static libraries, if possibly
+    # -dynamic-too
+    # -optP-include
+    # -optP.stack-work/.../cabal_macros.h
+    # -this-unit-id <label-name>-<version>-<thigummy>
+    #
+    # - various output dir controls
+    # - various package db controls
+    #
+    # Also what about...
+    # - optimizations
+    # - warnings
+    # - concurrent builds (-j4)
+    # - -threaded (I guess only relevant for executables)
+  ]
+  actions.run(
+    inputs = src,
+    outputs = object_files + interface_files,
+    executable = toolchain.ghc_path,
+    arguments = ghc_args,
+    progress_message = ("Compiling Haskell module %s" % (src,)),
+    mnemonic = 'HsCompile',
+    # TODO: Figure out how we can do without this.
+    use_default_shell_env = True,
+  )
+
+
 def _change_extension(file_object, new_extension):
   """Return the basename of 'file_object' with a new extension."""
   return file_object.basename[:-len(file_object.extension)] + new_extension

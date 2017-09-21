@@ -1,4 +1,4 @@
-load("//rules:haskell.bzl", "hs_library", "hs_binary")
+load("//haskell:haskell.bzl", "hs_library", "hs_binary")
 
 hs_library(
     name = "Foo",

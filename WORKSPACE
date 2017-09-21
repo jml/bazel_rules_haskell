@@ -1,1 +1,1 @@
-workspace(name = "io_bazel_rules_haskell")
+workspace(name = "io_jml_rules_haskell")

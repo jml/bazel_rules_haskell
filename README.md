@@ -1,3 +1,2 @@
-# Bazel build rules for Haskell
+Moved to https://github.com/jml/rules_haskell
 
-These are in a very early state; don't expect much to work yet.
